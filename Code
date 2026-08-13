@@ -1,0 +1,458 @@
+
+
+    # Connect interactively
+  Connect-MgGraph -Scopes @(
+    "Device.ReadWrite.All",
+    "DeviceManagementManagedDevices.ReadWrite.All",
+    "DeviceManagementServiceConfig.ReadWrite.All",
+    "Directory.AccessAsUser.All"
+)
+    Write-Host "✅ Connected to Microsoft Graph successfully." -ForegroundColor Green
+
+    # Show the current account info
+    $profile = Get-MgContext
+    Write-Host "Signed in as: $($profile.Account)" -ForegroundColor Cyan
+   
+
+
+# ==========================
+# VARIÁVEIS GLOBAIS
+# ==========================
+
+$script:CurrentPC = $null
+
+# ==========================
+# FUNÇÕES
+# ==========================
+
+function Get-PCIntune {
+
+    param($Pesquisa)
+
+    Add-Log "A procurar no Intune: $Pesquisa" 
+
+    $Device = Get-MgDeviceManagementManagedDevice -All |
+    Where-Object {
+        $_.DeviceName -eq $Pesquisa -or
+        $_.SerialNumber -eq $Pesquisa
+    }
+
+    if($Device){
+        Add-Log "Encontrado no Intune!"
+    }
+    else{
+        Add-Log "Não encontrado no Intune!"
+    }
+
+    return $Device
+}
+
+function Get-PCEntra {
+
+    param($Pesquisa)
+
+    Add-Log "A procurar no Entra: $Pesquisa"
+
+    try {
+
+        $Device = Get-MgDevice `
+            -Filter "displayName eq '$Pesquisa'"
+
+        if($Device){
+            Add-Log "✅ Encontrado no Entra ID!"
+        }
+        else{
+            Add-Log "❌ Não encontrado no Entra ID!"
+        }
+
+        return $Device
+
+    }
+    catch {
+
+        Add-Log "❌ ERRO Entra ID"
+        Add-Log $_.Exception.Message
+
+        return $null
+    }
+}
+function Get-PCAutopilot {
+
+    param($SerialNumber)
+
+    Add-Log "A procurar no Autopilot: $SerialNumber"
+
+    $AutoPilot = Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -All |
+    Where-Object {
+        $_.SerialNumber -eq $SerialNumber
+    }
+
+    if($AutoPilot){
+        Add-Log "Encontrado no Autopilot!"
+    }
+    else{
+        Add-Log "Não encontrado no Autopilot!"
+    }
+
+    return $AutoPilot
+}
+
+function Get-PC {
+
+    param($Pesquisa)
+
+    $Intune = Get-PCIntune $Pesquisa
+
+    $Entra = Get-PCEntra $Pesquisa $Pesquisa
+
+    $Autopilot = Get-PCAutopilot $Pesquisa
+
+    $Serial = $null
+    $Modelo = $null
+    $Utilizador = $null
+    $DeviceName = $Pesquisa
+
+    if($Intune){
+
+        $Serial = $Intune.SerialNumber
+        $Modelo = $Intune.Model
+        $Utilizador = $Intune.UserPrincipalName
+        $DeviceName = $Intune.DeviceName
+
+        if(!$Autopilot){
+
+            $Autopilot = Get-PCAutopilot $Serial
+
+        }
+
+    }
+
+    [PSCustomObject]@{
+
+        DeviceName = $DeviceName
+        Serial = $Serial
+        Modelo = $Modelo
+        Utilizador = $Utilizador
+
+        Intune = ($null -ne $Intune)
+        Entra = ($null -ne $Entra)
+        Autopilot = ($null -ne $Autopilot)
+
+        IntuneId = if($Intune){$Intune.Id}else{$null}
+        EntraId = if($Entra){$Entra.Id}else{$null}
+        AutopilotId = if($Autopilot){$Autopilot.Id}else{$null}
+
+    }
+
+}
+
+function Remove-PCIntune {
+
+    param($ManagedDeviceId)
+
+    Remove-MgDeviceManagementManagedDevice `
+        -ManagedDeviceId $ManagedDeviceId
+}
+function Remove-PCEntra {
+
+    param($EntraId)
+
+    Remove-MgDevice `
+        -DeviceId $EntraId
+
+}
+
+function Remove-PCAutopilot {
+
+    param($AutopilotId)
+
+    Remove-MgDeviceManagementWindowsAutopilotDeviceIdentity `
+        -WindowsAutopilotDeviceIdentityId $AutopilotId
+
+}
+function Add-Log {
+
+    param([string]$Message)
+
+    $Hora = Get-Date -Format "HH:mm:ss"
+
+    Write-Host "[$Hora] $Message"
+
+    if($null -ne $txtLog){
+        $txtLog.AppendText("[$Hora] $Message`r`n")
+    }
+}
+# ==========================
+# INTERFACE
+# ==========================
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "EliminadorTD"
+$form.Size = New-Object System.Drawing.Size(700,520)
+$form.StartPosition = "CenterScreen"
+
+
+
+# Pesquisa
+
+$txtPC = New-Object System.Windows.Forms.TextBox
+$txtPC.Location = New-Object System.Drawing.Point(20,20)
+$txtPC.Size = New-Object System.Drawing.Size(250,25)
+
+$btnPesquisar = New-Object System.Windows.Forms.Button
+$btnPesquisar.Location = New-Object System.Drawing.Point(290,18)
+$btnPesquisar.Size = New-Object System.Drawing.Size(120,30)
+$btnPesquisar.Text = "Pesquisar"
+
+# Labels
+
+$lblNome = New-Object System.Windows.Forms.Label
+$lblNome.Location = New-Object System.Drawing.Point(20,70)
+$lblNome.Size = New-Object System.Drawing.Size(600,20)
+
+$lblUser = New-Object System.Windows.Forms.Label
+$lblUser.Location = New-Object System.Drawing.Point(20,95)
+$lblUser.Size = New-Object System.Drawing.Size(600,20)
+
+$lblModelo = New-Object System.Windows.Forms.Label
+$lblModelo.Location = New-Object System.Drawing.Point(20,120)
+$lblModelo.Size = New-Object System.Drawing.Size(600,20)
+
+$lblSerial = New-Object System.Windows.Forms.Label
+$lblSerial.Location = New-Object System.Drawing.Point(20,145)
+$lblSerial.Size = New-Object System.Drawing.Size(600,20)
+
+$lblIntune = New-Object System.Windows.Forms.Label
+$lblIntune.Location = New-Object System.Drawing.Point(20,180)
+$lblIntune.Size = New-Object System.Drawing.Size(600,20)
+
+$lblEntra = New-Object System.Windows.Forms.Label
+$lblEntra.Location = New-Object System.Drawing.Point(20,205)
+$lblEntra.Size = New-Object System.Drawing.Size(600,20)
+
+$lblAutopilot = New-Object System.Windows.Forms.Label
+$lblAutopilot.Location = New-Object System.Drawing.Point(20,230)
+$lblAutopilot.Size = New-Object System.Drawing.Size(600,20)
+
+
+
+# Log
+
+$txtLog = New-Object System.Windows.Forms.TextBox
+$txtLog.Location = New-Object System.Drawing.Point(20,260)
+$txtLog.Size = New-Object System.Drawing.Size(640,110)
+$txtLog.Multiline = $true
+$txtLog.ScrollBars = "Vertical"
+$txtLog.ReadOnly = $true
+
+
+
+# Botão Remover Tudo
+
+$btnRemoverTudo = New-Object System.Windows.Forms.Button
+$btnRemoverTudo.Location = New-Object System.Drawing.Point(250,390)
+$btnRemoverTudo.Size = New-Object System.Drawing.Size(180,40)
+$btnRemoverTudo.Text = "Remover Tudo"
+$btnRemoverTudo.Enabled = $false
+
+
+
+# ==========================
+# PESQUISAR
+# ==========================
+
+$btnPesquisar.Add_Click({
+	
+
+    $txtLog.Clear()
+    Add-Log "A iniciar pesquisa..."
+
+    $Context = Get-MgContext
+
+	Add-Log "Conta Graph: $($Context.Account)"
+	Add-Log "Tenant: $($Context.TenantId)"
+	Add-Log "A iniciar pesquisa..."
+	
+    try {
+
+        $PC = Get-PC $txtPC.Text.Trim()
+
+        if($PC){
+
+            $script:CurrentPC = $PC
+
+		
+
+            $lblNome.Text = "Nome: $($PC.DeviceName)"
+            $lblUser.Text = "Utilizador: $($PC.Utilizador)"
+            $lblModelo.Text = "Modelo: $($PC.Modelo)"
+            $lblSerial.Text = "Serial: $($PC.Serial)"
+
+            if($PC.Intune){
+
+    $lblIntune.Text = "✅ Encontrado no Intune"
+    $lblIntune.ForeColor = "Green"
+
+}
+else{
+
+    $lblIntune.Text = "❌ Não encontrado no Intune"
+    $lblIntune.ForeColor = "Red"
+
+}
+
+
+            if($PC.Entra){
+
+                $lblEntra.Text = "✅ Encontrado no Entra ID"
+                $lblEntra.ForeColor = "Green"
+
+            }
+            else{
+
+                $lblEntra.Text = "❌ Não encontrado no Entra ID"
+                $lblEntra.ForeColor = "Red"
+
+            }
+
+            if($PC.Autopilot){
+
+                $lblAutopilot.Text = "✅ Encontrado no Autopilot"
+                $lblAutopilot.ForeColor = "Green"
+
+            }
+            else{
+
+                $lblAutopilot.Text = "❌ Não encontrado no Autopilot"
+                $lblAutopilot.ForeColor = "Red"
+
+            }
+
+ $btnRemoverTudo.Enabled = (
+    $PC.Intune -or
+    $PC.Entra -or
+    $PC.Autopilot
+)
+        }
+        else{
+
+            [System.Windows.Forms.MessageBox]::Show(
+                "PC não encontrado."
+            )
+
+        }
+
+    }
+    catch{
+
+        [System.Windows.Forms.MessageBox]::Show(
+            $_.Exception.Message,
+            "Erro"
+        )
+
+    }
+
+})
+
+
+
+# ==========================
+# REMOVER Todo lado
+# ==========================
+$btnRemoverTudo.Add_Click({
+
+    if(-not $script:CurrentPC){
+        return
+    }
+
+    $Confirmacao = [System.Windows.Forms.MessageBox]::Show(
+        "Remover $($script:CurrentPC.DeviceName) de todos os sistemas?",
+        "Confirmação",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
+
+    if($Confirmacao -ne "Yes"){
+        return
+    }
+
+    Add-Log "Início da remoção."
+
+    try {
+
+        if($script:CurrentPC.Autopilot){
+
+            Add-Log "A remover do Autopilot..."
+
+            Remove-PCAutopilot $script:CurrentPC.AutopilotId
+
+            Add-Log "Autopilot removido."
+        }
+
+        if($script:CurrentPC.Intune){
+
+            Add-Log "A remover do Intune..."
+
+            Remove-PCIntune $script:CurrentPC.IntuneId
+
+            Add-Log "Intune removido."
+        }
+
+        if($script:CurrentPC.Entra){
+
+            Add-Log "A remover do Entra ID..."
+
+            Remove-PCEntra $script:CurrentPC.EntraId
+
+            Add-Log "Entra ID removido."
+        }
+
+        Add-Log "Processo concluído."
+
+        [System.Windows.Forms.MessageBox]::Show(
+            "Remoção concluída com sucesso.",
+            "Sucesso"
+        )
+
+        $btnRemoverTudo.Enabled = $false
+
+    }
+    catch {
+
+        Add-Log "ERRO: $($_.Exception.Message)"
+
+        [System.Windows.Forms.MessageBox]::Show(
+            $_.Exception.Message,
+            "Erro"
+        )
+    }
+})
+# ==========================
+# CONTROLOS
+# ==========================
+
+$form.Controls.Add($txtPC)
+$form.Controls.Add($btnPesquisar)
+
+$form.Controls.Add($lblNome)
+$form.Controls.Add($lblUser)
+$form.Controls.Add($lblModelo)
+$form.Controls.Add($lblSerial)
+
+$form.Controls.Add($lblIntune)
+$form.Controls.Add($lblEntra)
+$form.Controls.Add($lblAutopilot)
+
+$form.Controls.Add($txtLog)
+
+$form.Controls.Add($btnRemoverTudo)
+# ==========================
+# ABRIR
+# ==========================
+
+$form.ShowDialog()
+
+
